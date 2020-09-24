@@ -45,20 +45,32 @@ func CreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := database.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
 	var id_order int
 
-	err = database.QueryRow("INSERT INTO orders (status) VALUES('recd') RETURNING id_order").Scan(&id_order)
+	err = tx.QueryRow("INSERT INTO orders (status) VALUES('recd') RETURNING id_order").Scan(&id_order)
 	if err != nil {
-		log.Println("Error -", err)
+		tx.Rollback()
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	for _, order := range orderList {
 		_, err = database.Exec("INSERT INTO orders_to_menu (id_order, id_menu, number) VALUES ($1, $2, $3)", id_order, order.ID_menu, order.Number)
 		if err != nil {
-			log.Println("Error -", err)
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
 	w.Write([]byte("OK"))
