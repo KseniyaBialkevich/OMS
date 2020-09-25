@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 
 	"net/http"
 
@@ -21,14 +20,26 @@ type Menu struct {
 }
 
 type Orders struct {
-	ID_order int    `json:"id_order"`
-	Status   string `json:"status"`
+	ID_order   int    `json:"id_order"`
+	Status     string `json:"status"`
+	Total_Cost int    `json:"total_cost"`
 }
 
 type OrdersToMenu struct {
 	ID_order int `json:"id_order"`
 	ID_menu  int `json:"id_menu"`
 	Number   int `json:"number"`
+}
+
+type OrderResponse struct {
+	Status string `json:"status"`
+	Order  int    `json:"order"`
+	Total  int    `json:"total"`
+}
+
+type StatusResponse struct {
+	ID_order int    `json:"id_order"`
+	Status   string `json:"status"`
 }
 
 var database *sql.DB
@@ -43,12 +54,15 @@ func CreateOrder(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&orderList)
 	if err != nil {
-		requestError(err, w)
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	tx, err := database.Begin()
 	if err != nil {
 		serverError(err, w)
+		return
 	}
 
 	var id_order int
@@ -57,6 +71,7 @@ func CreateOrder(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		tx.Rollback()
 		serverError(err, w)
+		return
 	}
 
 	for _, order := range orderList {
@@ -64,51 +79,74 @@ func CreateOrder(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			tx.Rollback()
 			serverError(err, w)
+			return
 		}
+	}
+
+	sum := tx.QueryRow("SELECT SUM(otm.number * m.price) FROM orders_to_menu AS otm JOIN menu AS m ON otm.id_menu = m.id_menu WHERE otm.id_order = $1", id_order)
+
+	var total_cost int
+
+	err = sum.Scan(&total_cost)
+	if err != nil {
+		tx.Rollback()
+		serverError(err, w)
+		return
+	}
+
+	_, err = tx.Exec("UPDATE orders SET total_cost = $1 WHERE id_order = $2", total_cost, id_order)
+	if err != nil {
+		tx.Rollback()
+		serverError(err, w)
+		return
 	}
 
 	err = tx.Commit()
 	if err != nil {
 		serverError(err, w)
+		return
+	} else {
+		jsonResultEncode(id_order, total_cost, w) // err -?
 	}
-
-	id := strconv.Itoa(id_order)
-
-	w.Write([]byte(id + " - OK"))
 }
 
 func OrderIsReady(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id_order := vars["id_order"]
+	id := vars["id_order"]
+	id_order, _ := strconv.Atoi(id)
 
 	var status string
 
 	err := database.QueryRow("UPDATE orders SET status='ready' WHERE id_order=$1 RETURNING status", id_order).Scan(&status)
 	if err != nil {
 		serverError(err, w)
+		return
+	} else {
+		jsonEncode(id_order, status, w) // err -?
 	}
-
-	w.Write([]byte("order: " + id_order + "\nstatus: " + status))
 }
 
 func OrderIsCompleted(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	id_order := vars["id_order"]
+	id := vars["id_order"]
+	id_order, _ := strconv.Atoi(id)
 
 	var status string
 
 	err := database.QueryRow("UPDATE orders SET status='completed' WHERE id_order=$1 RETURNING status", id_order).Scan(&status)
 	if err != nil {
 		serverError(err, w)
+		return
+	} else {
+		jsonEncode(id_order, status, w) // err - ?
 	}
-
-	w.Write([]byte("order: " + id_order + "\nstatus: " + status))
 }
 
 func ListOrdersPendingProcessing(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.Query("SELECT id_order FROM orders WHERE status='recd'")
 	if err != nil {
 		serverError(err, w)
+		return
 	}
 
 	defer rows.Close()
@@ -126,23 +164,14 @@ func ListOrdersPendingProcessing(w http.ResponseWriter, r *http.Request) {
 		orders = append(orders, order)
 	}
 
-	ordersText := (make([]string, 0))
-
-	for idx, _ := range orders {
-		id := orders[idx]
-		idTxt := strconv.Itoa(id)
-		ordersText = append(ordersText, idTxt)
-	}
-
-	result := strings.Join(ordersText, "\n")
-
-	w.Write([]byte("the orders are received:\n" + result))
+	jsonListEncode(orders, w) // err -?
 }
 
 func ListOrdersPendingIssuance(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.Query("SELECT id_order FROM orders WHERE status='ready'")
 	if err != nil {
 		serverError(err, w)
+		return
 	}
 
 	defer rows.Close()
@@ -160,29 +189,40 @@ func ListOrdersPendingIssuance(w http.ResponseWriter, r *http.Request) {
 		orders = append(orders, order)
 	}
 
-	ordersText := (make([]string, 0))
-
-	for idx, _ := range orders {
-		id := orders[idx]
-		idTxt := strconv.Itoa(id)
-		ordersText = append(ordersText, idTxt)
-	}
-
-	result := strings.Join(ordersText, "\n")
-
-	w.Write([]byte("the orders are redy:\n" + result))
-}
-
-func requestError(err error, w http.ResponseWriter) {
-	log.Println(err)
-	http.Error(w, err.Error(), http.StatusBadRequest)
-	return
+	jsonListEncode(orders, w) // err -?
 }
 
 func serverError(err error, w http.ResponseWriter) {
 	log.Println(err)
 	http.Error(w, err.Error(), http.StatusInternalServerError)
-	return
+}
+
+func jsonResultEncode(id_order int, total_cost int, w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+
+	response := OrderResponse{
+		Status: "OK",
+		Order:  id_order,
+		Total:  total_cost,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func jsonEncode(id_order int, status string, w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+
+	response := StatusResponse{
+		ID_order: id_order,
+		Status:   status,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func jsonListEncode(orders []int, w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(orders)
 }
 
 func main() {

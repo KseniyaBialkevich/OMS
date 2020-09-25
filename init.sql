@@ -22,7 +22,8 @@ INSERT INTO menu  (name, price)
 
 CREATE TABLE orders (
     id_order SERIAL PRIMARY KEY, 
-    status VARCHAR(100) NOT NULL
+    status VARCHAR(100) NOT NULL,
+    total_cost INTEGER
 );
 
 CREATE TABLE orders_to_menu (
