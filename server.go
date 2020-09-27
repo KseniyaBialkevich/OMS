@@ -32,6 +32,20 @@ type OrderToMenu struct {
 
 var database *sql.DB
 
+func serverError(w http.ResponseWriter, err error, statusCode int) {
+	log.Println(err)
+	http.Error(w, err.Error(), statusCode)
+}
+
+func jsonEncodeResponse(w http.ResponseWriter, obj interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(w).Encode(obj)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return
+	}
+}
+
 func LookAtMenu(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.Query("SELECT * FROM menu")
 	if err != nil {
@@ -55,7 +69,7 @@ func LookAtMenu(w http.ResponseWriter, r *http.Request) {
 		menuList = append(menuList, menuItem)
 	}
 
-	jsonEncodeResponse(menuList, w)
+	jsonEncodeResponse(w, menuList)
 }
 
 func CreateOrder(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +110,11 @@ func CreateOrder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	row := tx.QueryRow("SELECT SUM(otm.number * m.price)"+
-		"FROM orders_to_menu AS otm JOIN menu AS m ON otm.id_menu = m.id_menu WHERE otm.id_order = $1", idOrder)
+	row := tx.QueryRow(
+		`SELECT SUM(otm.number * m.price) 
+		FROM orders_to_menu AS otm JOIN menu AS m ON otm.id_menu = m.id_menu 
+		WHERE otm.id_order = $1`,
+		idOrder)
 
 	var totalCost int
 
@@ -119,19 +136,19 @@ func CreateOrder(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
-	} else {
-		row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
-
-		order := Order{}
-
-		err := row.Scan(&order.ID, &order.Status, &order.TotalCost)
-		if err != nil {
-			serverError(w, err, http.StatusInternalServerError)
-			return
-		}
-
-		jsonEncodeResponse(order, w)
 	}
+
+	row = database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
+
+	order := Order{}
+
+	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	jsonEncodeResponse(w, order)
 }
 
 func ViewTheOrder(w http.ResponseWriter, r *http.Request) {
@@ -160,9 +177,12 @@ func ViewTheOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := database.Query("SELECT m.id_menu, m.name, otm.number, SUM(otm.number * m.price)"+
-		"AS total FROM menu AS m JOIN orders_to_menu AS otm ON m.id_menu = otm.id_menu WHERE otm.id_order = $1"+
-		"GROUP BY m.id_menu, m.name, otm.number", idOrder)
+	rows, err := database.Query(
+		`SELECT m.id_menu, m.name, otm.number, SUM(otm.number * m.price) AS total 
+		FROM menu AS m JOIN orders_to_menu AS otm ON m.id_menu = otm.id_menu 
+		WHERE otm.id_order = $1
+		GROUP BY m.id_menu, m.name, otm.number`,
+		idOrder)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
@@ -184,10 +204,14 @@ func ViewTheOrder(w http.ResponseWriter, r *http.Request) {
 		orderDetailList = append(orderDetailList, orderDetail)
 	}
 
-	result := []interface{}{"order:", order, "order details:", orderDetailList}
+	type OrderResult struct {
+		Order           Order          `json:"order"`
+		OrderDetailList []OrderDetails `json:"order_detail_list"`
+	}
 
-	jsonEncodeResponse(result, w)
+	result := OrderResult{Order: order, OrderDetailList: orderDetailList}
 
+	jsonEncodeResponse(w, result)
 }
 
 func OrderIsReady(w http.ResponseWriter, r *http.Request) {
@@ -203,19 +227,19 @@ func OrderIsReady(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
-	} else {
-		row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
-
-		order := Order{}
-
-		err := row.Scan(&order.ID, &order.Status, &order.TotalCost)
-		if err != nil {
-			serverError(w, err, http.StatusInternalServerError)
-			return
-		}
-
-		jsonEncodeResponse(order, w)
 	}
+
+	row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
+
+	order := Order{}
+
+	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	jsonEncodeResponse(w, order)
 }
 
 func OrderIsCompleted(w http.ResponseWriter, r *http.Request) {
@@ -231,19 +255,19 @@ func OrderIsCompleted(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
-	} else {
-		row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
-
-		order := Order{}
-
-		err := row.Scan(&order.ID, &order.Status, &order.TotalCost)
-		if err != nil {
-			serverError(w, err, http.StatusInternalServerError)
-			return
-		}
-
-		jsonEncodeResponse(order, w)
 	}
+
+	row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
+
+	order := Order{}
+
+	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	jsonEncodeResponse(w, order)
 }
 
 func ListOrdersPendingProcessing(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +292,7 @@ func ListOrdersPendingProcessing(w http.ResponseWriter, r *http.Request) {
 		ordersList = append(ordersList, order)
 	}
 
-	jsonEncodeResponse(ordersList, w)
+	jsonEncodeResponse(w, ordersList)
 }
 
 func ListOrdersPendingIssuance(w http.ResponseWriter, r *http.Request) {
@@ -293,21 +317,7 @@ func ListOrdersPendingIssuance(w http.ResponseWriter, r *http.Request) {
 		ordersList = append(ordersList, order)
 	}
 
-	jsonEncodeResponse(ordersList, w)
-}
-
-func serverError(w http.ResponseWriter, err error, statusCode int) {
-	log.Println(err)
-	http.Error(w, err.Error(), statusCode)
-}
-
-func jsonEncodeResponse(obj interface{}, w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(obj)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
+	jsonEncodeResponse(w, ordersList)
 }
 
 func main() {
