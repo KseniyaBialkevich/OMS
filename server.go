@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"net/http"
 
@@ -339,12 +344,37 @@ func main() {
 	router.HandleFunc("/processing", ListOrdersPendingProcessing)
 	router.HandleFunc("/issuance", ListOrdersPendingIssuance)
 
-	http.Handle("/", router)
-
-	fmt.Println("Server is listening...")
-
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		log.Println("HTTP Server Error - ", err)
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: router,
 	}
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	startServerFunc := func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}
+	go startServerFunc()
+
+	log.Print("Server Started")
+	log.Printf("pid: %d\n", os.Getpid())
+
+	msg := <-done
+	log.Printf("Stop server command: '%s'", msg)
+	log.Print("Server Stopped")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	closeFunc := func() {
+		cancel()
+	}
+	defer closeFunc()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server Shutdown Failed:%+v", err)
+	}
+	log.Print("Server Exited Properly")
 }
