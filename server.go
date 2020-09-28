@@ -38,6 +38,8 @@ type OrderToMenu struct {
 var database *sql.DB
 
 func serverError(w http.ResponseWriter, err error, statusCode int) {
+	// stackTrace := string(debug.Stack())
+	// msg := fmt.Sprintf("Error: %s\n%s", err, stackTrace)
 	log.Println(err)
 	http.Error(w, err.Error(), statusCode)
 }
@@ -49,6 +51,51 @@ func jsonEncodeResponse(w http.ResponseWriter, obj interface{}) {
 		serverError(w, err, http.StatusInternalServerError)
 		return
 	}
+}
+
+func changeStatus(w http.ResponseWriter, idOrder string, status string) (*Order, error) {
+	_, err := database.Exec("UPDATE orders SET status = $1 WHERE id_order = $2", status, idOrder)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return nil, err
+	}
+
+	row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
+
+	order := Order{}
+
+	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return nil, err
+	}
+
+	return &order, nil
+}
+
+func returnOrderList(w http.ResponseWriter, status string) ([]Order, error) {
+	rows, err := database.Query("SELECT * FROM orders WHERE status = $1", status)
+	if err != nil {
+		serverError(w, err, http.StatusInternalServerError)
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	ordersList := []Order{}
+
+	for rows.Next() {
+		order := Order{}
+
+		err := rows.Scan(&order.ID, &order.Status, &order.TotalCost)
+		if err != nil {
+			serverError(w, err, http.StatusInternalServerError)
+			return nil, err
+		}
+		ordersList = append(ordersList, order)
+	}
+
+	return ordersList, nil
 }
 
 func LookAtMenu(w http.ResponseWriter, r *http.Request) {
@@ -195,7 +242,7 @@ func ViewTheOrder(w http.ResponseWriter, r *http.Request) {
 
 	defer rows.Close()
 
-	orderDetailList := []OrderDetails{}
+	orderDetailsList := []OrderDetails{}
 
 	for rows.Next() {
 		orderDetail := OrderDetails{}
@@ -206,15 +253,15 @@ func ViewTheOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		orderDetailList = append(orderDetailList, orderDetail)
+		orderDetailsList = append(orderDetailsList, orderDetail)
 	}
 
 	type OrderResult struct {
-		Order           Order          `json:"order"`
-		OrderDetailList []OrderDetails `json:"order_detail_list"`
+		Order            Order          `json:"order"`
+		OrderDetailsList []OrderDetails `json:"order_details_list"`
 	}
 
-	result := OrderResult{Order: order, OrderDetailList: orderDetailList}
+	result := OrderResult{Order: order, OrderDetailsList: orderDetailsList}
 
 	jsonEncodeResponse(w, result)
 }
@@ -228,17 +275,9 @@ func OrderIsReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := database.Exec("UPDATE orders SET status = 'ready' WHERE id_order = $1", idOrder)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
+	status := "ready"
 
-	row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
-
-	order := Order{}
-
-	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
+	order, err := changeStatus(w, idOrder, status)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
@@ -256,17 +295,9 @@ func OrderIsCompleted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := database.Exec("UPDATE orders SET status = 'completed' WHERE id_order = $1", idOrder)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
+	status := "completed"
 
-	row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
-
-	order := Order{}
-
-	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
+	order, err := changeStatus(w, idOrder, status)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
@@ -276,50 +307,24 @@ func OrderIsCompleted(w http.ResponseWriter, r *http.Request) {
 }
 
 func ListOrdersPendingProcessing(w http.ResponseWriter, r *http.Request) {
-	rows, err := database.Query("SELECT * FROM orders WHERE status = 'received'")
+	status := "received"
+
+	ordersList, err := returnOrderList(w, status)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
-	}
-
-	defer rows.Close()
-
-	ordersList := []Order{}
-
-	for rows.Next() {
-		order := Order{}
-
-		err := rows.Scan(&order.ID, &order.Status, &order.TotalCost)
-		if err != nil {
-			serverError(w, err, http.StatusInternalServerError)
-			return
-		}
-		ordersList = append(ordersList, order)
 	}
 
 	jsonEncodeResponse(w, ordersList)
 }
 
 func ListOrdersPendingIssuance(w http.ResponseWriter, r *http.Request) {
-	rows, err := database.Query("SELECT * FROM orders WHERE status = 'ready'")
+	status := "ready"
+
+	ordersList, err := returnOrderList(w, status)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
 		return
-	}
-
-	defer rows.Close()
-
-	ordersList := []Order{}
-
-	for rows.Next() {
-		order := Order{}
-
-		err := rows.Scan(&order.ID, &order.Status, &order.TotalCost)
-		if err != nil {
-			serverError(w, err, http.StatusInternalServerError)
-			return
-		}
-		ordersList = append(ordersList, order)
 	}
 
 	jsonEncodeResponse(w, ordersList)
