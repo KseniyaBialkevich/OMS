@@ -312,13 +312,13 @@ func main() {
 	defer db.Close()
 
 	router := mux.NewRouter()
-	router.HandleFunc("/menu", LookAtMenu)
-	router.HandleFunc("/create_order", CreateOrder)
-	router.HandleFunc("/order/{id_order:[0-9]+}", ViewTheOrder)
-	router.HandleFunc("/ready/{id_order:[0-9]+}", OrderIsReady)
-	router.HandleFunc("/completed/{id_order:[0-9]+}", OrderIsCompleted)
-	router.HandleFunc("/received_orders", ListOfReceivedOrders)
-	router.HandleFunc("/ready_orders", ListOfReadyOrders)
+	router.HandleFunc("/menu", LookAtMenu).Methods("GET")
+	router.HandleFunc("/create_order", CreateOrder).Methods("POST")
+	router.HandleFunc("/order/{id_order:[0-9]+}", ViewTheOrder).Methods("GET")
+	router.HandleFunc("/ready/{id_order:[0-9]+}", OrderIsReady).Methods("PUT")
+	router.HandleFunc("/completed/{id_order:[0-9]+}", OrderIsCompleted).Methods("PUT")
+	router.HandleFunc("/received_orders", ListOfReceivedOrders).Methods("GET")
+	router.HandleFunc("/ready_orders", ListOfReadyOrders).Methods("GET")
 
 	srv := &http.Server{
 		Addr:    ":8080",
