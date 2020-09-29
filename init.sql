@@ -1,6 +1,6 @@
-sudo -u postgres psql
-\c oms_db
-\d
+-- sudo -u postgres psql
+-- \c oms_db
+-- \d
 
 CREATE DATABASE oms_db;
 

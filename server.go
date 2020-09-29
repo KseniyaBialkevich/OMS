@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -38,14 +39,16 @@ type OrderToMenu struct {
 var database *sql.DB
 
 func serverError(w http.ResponseWriter, err error, statusCode int) {
-	// stackTrace := string(debug.Stack())
-	// msg := fmt.Sprintf("Error: %s\n%s", err, stackTrace)
-	log.Println(err)
+	stackTrace := string(debug.Stack())
+	msg := fmt.Sprintf("Error: %s\n%s", err, stackTrace)
+
+	log.Println(msg)
 	http.Error(w, err.Error(), statusCode)
 }
 
 func jsonEncodeResponse(w http.ResponseWriter, obj interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+
 	err := json.NewEncoder(w).Encode(obj)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
@@ -53,11 +56,19 @@ func jsonEncodeResponse(w http.ResponseWriter, obj interface{}) {
 	}
 }
 
-func changeStatus(w http.ResponseWriter, idOrder string, status string) (*Order, error) {
+func changeStatus(w http.ResponseWriter, r *http.Request, status string) {
+	vars := mux.Vars(r)
+	idOrder, ok := vars["id_order"]
+	if !ok {
+		err := fmt.Errorf("order id parameter is not found")
+		serverError(w, err, http.StatusBadRequest)
+		return
+	}
+
 	_, err := database.Exec("UPDATE orders SET status = $1 WHERE id_order = $2", status, idOrder)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
-		return nil, err
+		return
 	}
 
 	row := database.QueryRow("SELECT * FROM orders WHERE id_order = $1", idOrder)
@@ -67,17 +78,17 @@ func changeStatus(w http.ResponseWriter, idOrder string, status string) (*Order,
 	err = row.Scan(&order.ID, &order.Status, &order.TotalCost)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
-		return nil, err
+		return
 	}
 
-	return &order, nil
+	jsonEncodeResponse(w, order)
 }
 
-func returnOrderList(w http.ResponseWriter, status string) ([]Order, error) {
+func returnOrderList(w http.ResponseWriter, status string) {
 	rows, err := database.Query("SELECT * FROM orders WHERE status = $1", status)
 	if err != nil {
 		serverError(w, err, http.StatusInternalServerError)
-		return nil, err
+		return
 	}
 
 	defer rows.Close()
@@ -90,12 +101,12 @@ func returnOrderList(w http.ResponseWriter, status string) ([]Order, error) {
 		err := rows.Scan(&order.ID, &order.Status, &order.TotalCost)
 		if err != nil {
 			serverError(w, err, http.StatusInternalServerError)
-			return nil, err
+			return
 		}
 		ordersList = append(ordersList, order)
 	}
 
-	return ordersList, nil
+	jsonEncodeResponse(w, ordersList)
 }
 
 func LookAtMenu(w http.ResponseWriter, r *http.Request) {
@@ -267,71 +278,31 @@ func ViewTheOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func OrderIsReady(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idOrder, ok := vars["id_order"]
-	if !ok {
-		err := fmt.Errorf("order id parameter is not found")
-		serverError(w, err, http.StatusBadRequest)
-		return
-	}
-
-	status := "ready"
-
-	order, err := changeStatus(w, idOrder, status)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
-
-	jsonEncodeResponse(w, order)
+	changeStatus(w, r, "ready")
 }
 
 func OrderIsCompleted(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	idOrder, ok := vars["id_order"]
-	if !ok {
-		err := fmt.Errorf("order id parameter is not found")
-		serverError(w, err, http.StatusBadRequest)
-		return
-	}
-
-	status := "completed"
-
-	order, err := changeStatus(w, idOrder, status)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
-
-	jsonEncodeResponse(w, order)
+	changeStatus(w, r, "completed")
 }
 
-func ListOrdersPendingProcessing(w http.ResponseWriter, r *http.Request) {
-	status := "received"
-
-	ordersList, err := returnOrderList(w, status)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
-
-	jsonEncodeResponse(w, ordersList)
+func ListOfReceivedOrders(w http.ResponseWriter, r *http.Request) {
+	returnOrderList(w, "received")
 }
 
-func ListOrdersPendingIssuance(w http.ResponseWriter, r *http.Request) {
-	status := "ready"
-
-	ordersList, err := returnOrderList(w, status)
-	if err != nil {
-		serverError(w, err, http.StatusInternalServerError)
-		return
-	}
-
-	jsonEncodeResponse(w, ordersList)
+func ListOfReadyOrders(w http.ResponseWriter, r *http.Request) {
+	returnOrderList(w, "ready")
 }
 
 func main() {
-	db, err := sql.Open("postgres", "user=kspsql password=pass1111 dbname=oms_db sslmode=disable")
+	host := os.Getenv("host")
+	port := os.Getenv("port")
+	user := os.Getenv("user")
+	password := os.Getenv("password")
+	dbname := os.Getenv("dbname")
+
+	dataSourceName := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s", host, port, user, password, dbname)
+
+	db, err := sql.Open("postgres", dataSourceName)
 	if err != nil {
 		panic(err)
 	}
@@ -346,8 +317,8 @@ func main() {
 	router.HandleFunc("/order/{id_order:[0-9]+}", ViewTheOrder)
 	router.HandleFunc("/ready/{id_order:[0-9]+}", OrderIsReady)
 	router.HandleFunc("/completed/{id_order:[0-9]+}", OrderIsCompleted)
-	router.HandleFunc("/processing", ListOrdersPendingProcessing)
-	router.HandleFunc("/issuance", ListOrdersPendingIssuance)
+	router.HandleFunc("/received_orders", ListOfReceivedOrders)
+	router.HandleFunc("/ready_orders", ListOfReadyOrders)
 
 	srv := &http.Server{
 		Addr:    ":8080",
