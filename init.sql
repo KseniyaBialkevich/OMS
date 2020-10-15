@@ -27,9 +27,13 @@ CREATE TABLE orders (
 );
 
 CREATE TABLE orders_to_menu (
-    id_order BIGINT NOT NULL, 
+    id_order INTEGER NOT NULL, 
     id_menu INTEGER NOT NULL, 
-    number INTEGER NOT NULL
+    number INTEGER NOT NULL,
+    CONSTRAINT fk_order FOREIGN KEY (id_order) 
+    REFERENCES orders (id_order), 
+    CONSTRAINT fk_menu FOREIGN KEY (id_menu) 
+    REFERENCES menu (id_menu)
 );
 
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO kspsql;

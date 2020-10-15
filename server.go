@@ -41,8 +41,8 @@ var database *sql.DB
 func serverError(w http.ResponseWriter, err error, statusCode int) {
 	stackTrace := string(debug.Stack())
 	msg := fmt.Sprintf("Error: %s\n%s", err, stackTrace)
-
 	log.Println(msg)
+
 	http.Error(w, err.Error(), statusCode)
 }
 
