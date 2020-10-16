@@ -5,6 +5,12 @@ services:
   volumes:
    - .:/app
   command: go run server.go
+  environment:
+   - host=localhost
+   - port=5432
+   - user=kspsql
+   - password=pass1111
+   - dbname=oms_db
   ports:
    - "8080:8080"
   depends_on:
@@ -14,10 +20,6 @@ services:
  db:
   image: postgres:latest
   container_name: "oms_psql"
-  environment:
-   - POSTGRES_USER=kspsql
-   - POSTGRES_PASSWORD=​pass1111
-   - POSTGRES_DB=oms
   ports:
    - "5432:5432"
   restart: always
